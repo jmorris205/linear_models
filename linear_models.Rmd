@@ -1,0 +1,196 @@
+---
+title: "Linear Models!"
+author: "Jonathan Morris"
+date: "2026-11-12"
+output: github_document
+---
+
+# Load packages
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+```
+
+## Load Data
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(stars = review_scores_location / 2) |> 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood) |> 
+  filter(borough != "Staten Island") |> 
+  select(price, stars, borough, neighborhood, room_type)
+```
+
+## Fit LM
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+```{r}
+## RUn with factors:
+nyc_airbnb = 
+  nyc_airbnb |> 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type))
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+## Tidy model:
+```{r}
+fit |> 
+  broom::glance()
+
+fit |> 
+  broom::tidy()
+```
+
+```{r}
+fit |> 
+  broom::tidy() |> 
+  select(term, estimate, p.value) |> 
+  mutate(term = str_replace(term, "^borough", "Borough: ")) |> 
+  knitr::kable(digits = 3)
+```
+
+
+```{r}
+modelr::add_residuals(nyc_airbnb, fit)
+```
+## Add predictions:
+```{r}
+modelr::add_predictions(nyc_airbnb, fit)
+```
+
+## Plot Model residuals:
+```{r}
+nyc_airbnb |> 
+  modelr::add_residuals(fit) |> 
+  ggplot(aes(x = borough, y = resid)) + geom_violin()
+
+nyc_airbnb |> 
+  modelr::add_residuals(fit) |> 
+  ggplot(aes(x = stars, y = resid)) + geom_point()
+```
+
+## Hypothesis Testing
+```{r}
+fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) |> 
+  broom::tidy()
+```
+
+```{r}
+nyc_airbnb |> 
+  lm(price ~ stars * borough + room_type * borough, data = _) |> 
+  broom::tidy() |> 
+  knitr::kable(digits = 3)
+```
+
+
+
+```{r}
+nest_lm_res =
+  nyc_airbnb |> 
+  nest(data = -borough) |> 
+  mutate(
+    models = map(data, \(df) lm(price ~ stars + room_type, data = df)),
+    results = map(models, broom::tidy)) |> 
+  select(-data, -models) |> 
+  unnest(results)
+```
+
+## Interactions:
+
+```{r}
+nyc_airbnb |> 
+  filter(borough == "Manhattan") |> 
+  lm(price ~ stars + room_type, data = _) |> 
+  broom::tidy()
+
+nyc_airbnb |> 
+  filter(borough == "Bronx") |> 
+  lm(price ~ stars + room_type, data = _) |> 
+  broom::tidy()
+```
+
+## Fix with iteration:
+```{r}
+airbnb_lm = function(data) {
+  lm(price ~ stars + room_type, data = data)
+}
+
+nyc_airbnb |> 
+  nest(datasets = -borough) |> 
+  mutate(
+    fits = map(datasets, airbnb_lm),
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(-datasets, -fits) |> 
+  unnest(results) |> 
+  select(borough, term, estimate) |> 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  )
+```
+
+```{r}
+nyc_airbnb |> 
+  lm(price ~ (stars + room_type)*borough, data = _) |> 
+  broom::tidy()
+```
+
+```{r}
+nyc_airbnb |> 
+  filter(borough == "Manhattan") |> 
+  nest(datasets = -neighborhood) |> 
+  mutate(
+    fits = map(datasets, \(df) lm(price~stars + room_type, data = df)),
+    results = map(fits, broom::tidy)
+  ) |> 
+  select(neighborhood, results) |> 
+  unnest(results) |> 
+  filter(term == "room_typePrivate room") |> 
+  ggplot(aes(x = neighborhood, y = estimate)) +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+
+
+## Logistic regression!!!!
+```{r}
+## Load data:
+baltimore_df = 
+  read_csv("https://p8105.com/data/homicide-data.csv") |> 
+  filter(city == "Baltimore") |> 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age)
+  )
+```
+
+## Fit Logistic Reg:
+```{r}
+fit_logistic = 
+  baltimore_df |> 
+  mutate(victim_race = fct_infreq(victim_race)) |> 
+  glm(resolved ~ victim_age + victim_race, data = _, family = binomial())
+
+fit_logistic |> 
+  broom::tidy() |> 
+  mutate(OR = exp(estimate)) |> 
+  select(term, OR, estimate, p.value) |> 
+  knitr::kable(digits = 3)
+```
+
